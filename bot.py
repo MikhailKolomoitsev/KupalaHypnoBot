@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from telegram import InputFile, Update
@@ -45,7 +45,23 @@ MESSAGE_TEXT = (
     "Після оплати, будь ласка, надішліть сюди скріншот."
 )
 
-THANK_YOU_TEXT = "Дякуємо за оплату! 🙏 Скріншот отримано."
+THANK_YOU_TEXT = (
+    "Дякуємо за оплату! 🙏 Скріншот отримано.\n\n"
+    "Завтра вам надійде гайд по роботі з мисленням, як ефективно змінювати своє життя."
+)
+
+MATERIAL_LINK = os.environ.get(
+    "MATERIAL_LINK",
+    "https://app.notion.com/p/3616c400a058806ab9f6edc9d7761e2d?source=copy_link",
+)
+MATERIAL_TEXT = (
+    "🧠 Як обіцяли — гайд по роботі з мисленням, як ефективно змінювати своє життя:\n"
+    f"{MATERIAL_LINK}"
+)
+# How long after a payment screenshot to deliver the material
+MATERIAL_DELAY = timedelta(hours=24)
+# How often to check for materials that are due to be sent (seconds)
+MATERIAL_CHECK_INTERVAL = 600
 
 
 def build_keyword_pattern(keywords: list[str]) -> re.Pattern:
@@ -73,7 +89,47 @@ def init_db() -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_materials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            send_at TEXT NOT NULL,
+            sent INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
     conn.commit()
+    conn.close()
+
+
+def schedule_material(user_id: int) -> None:
+    send_at = (datetime.now(timezone.utc) + MATERIAL_DELAY).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO pending_materials (user_id, send_at, sent) VALUES (?, ?, 0)",
+        (user_id, send_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def deliver_pending_materials(context) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, user_id FROM pending_materials WHERE sent = 0 AND send_at <= ?",
+        (now,),
+    ).fetchall()
+
+    for row_id, user_id in rows:
+        try:
+            await context.bot.send_message(chat_id=user_id, text=MATERIAL_TEXT)
+            conn.execute("UPDATE pending_materials SET sent = 1 WHERE id = ?", (row_id,))
+            conn.commit()
+        except Exception:
+            logger.exception("Failed to deliver material to user %s", user_id)
+
     conn.close()
 
 
@@ -132,8 +188,9 @@ async def payment_screenshot(update: Update, context) -> None:
     user = update.effective_user
     save_user(user)
 
-    # Thank the person who sent the screenshot
+    # Thank the person who sent the screenshot and queue tomorrow's material
     await update.message.reply_text(THANK_YOU_TEXT)
+    schedule_material(user.id)
 
     # Notify admin(s) privately with the same screenshot
     if not ADMIN_IDS:
@@ -197,6 +254,10 @@ def main() -> None:
         MessageHandler(filters.TEXT & filters.Regex(KEYWORD_PATTERN), keyword_trigger)
     )
     application.add_handler(MessageHandler(filters.PHOTO, payment_screenshot))
+
+    application.job_queue.run_repeating(
+        deliver_pending_materials, interval=MATERIAL_CHECK_INTERVAL, first=10
+    )
 
     logger.info("Bot started. Keywords: %s", KEYWORDS)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
