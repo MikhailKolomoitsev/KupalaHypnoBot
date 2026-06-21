@@ -26,9 +26,12 @@ KEYWORDS = [w.strip().lower() for w in os.environ.get("KEYWORDS", "донат").
 PHOTO_FILENAME = os.environ.get("PHOTO_FILENAME", "IMG_9933.jpg")
 PHOTO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), PHOTO_FILENAME)
 
-# On Railway, attach a Volume and set DB_PATH to a path inside it (e.g. /data/users.db)
-# so the user list survives redeploys. Without a volume, this file resets on each deploy.
-DB_PATH = os.environ.get("DB_PATH", "users.db")
+# If a Railway Volume is attached, RAILWAY_VOLUME_MOUNT_PATH is set automatically and the
+# database is stored there so it survives redeploys. Otherwise it falls back to a local file
+# (fine locally, but resets on every Railway redeploy without a volume).
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(
+    os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "."), "users.db"
+)
 
 # Comma-separated Telegram user IDs allowed to use /stats and /export
 ADMIN_IDS = {
@@ -36,8 +39,10 @@ ADMIN_IDS = {
 }
 
 MESSAGE_TEXT = (
-    "Дякую за підтримку! 🙏\n\n"
-    f"Посилання для оплати(будь який донат від 100грн): {PAYMENT_LINK}"
+    "Треба допомагати хлопцям на передку. Будь-який донат вже важливий — "
+    "хлопці розуміють, що за ними підтримка, що про них пам'ятають, що вони не самі.\n\n"
+    f"🙏 Будь-який донат від 100 грн: {PAYMENT_LINK}\n\n"
+    "Після оплати, будь ласка, надішліть сюди скріншот."
 )
 
 THANK_YOU_TEXT = "Дякуємо за оплату! 🙏 Скріншот отримано."
