@@ -2,8 +2,11 @@ import logging
 import os
 import re
 
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+load_dotenv()  # reads .env locally; no-op on Railway (uses dashboard Variables)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
